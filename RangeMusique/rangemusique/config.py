@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import sys
 
@@ -36,6 +37,11 @@ def load():
 def save(cfg):
     with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=2, ensure_ascii=False)
+
+
+def clean_key(key):
+    """Retire espaces, retours à la ligne et caractères invisibles d'un copier-coller."""
+    return re.sub(r"[^A-Za-z0-9_-]", "", key or "")
 
 
 def find_fpcalc(configured=""):

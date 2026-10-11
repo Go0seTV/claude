@@ -139,13 +139,14 @@ class WebAPI:
         return out
 
     def check_acoustid_key(self):
-        """True si la clé est acceptée par AcoustID."""
+        """Renvoie (ok, message d'AcoustID). Seule l'erreur « invalid API key »
+        (code 4) signifie que la clé est refusée."""
         data = urllib.parse.urlencode({
             "client": self.acoustid_key, "duration": 1, "fingerprint": "AQAAAA",
         }).encode("ascii")
         res = self._request(ACOUSTID_URL, data=data, retries=1) or {}
-        msg = res.get("error", {}).get("message", "").lower()
-        return "api key" not in msg and "client" not in msg
+        err = res.get("error") or {}
+        return err.get("code") != 4, err.get("message", "")
 
     # --- MusicBrainz ---------------------------------------------------------
     def _mb_json(self, url):

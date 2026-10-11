@@ -49,3 +49,15 @@ def test_offline_breaker():
         with pytest.raises(NetworkError):
             api.mb_search("x")
     assert api.offline
+
+
+def test_key_check_only_refuses_invalid_key():
+    api = Scripted([{"status": "error", "error": {"code": 3, "message": "invalid fingerprint"}},
+                    {"status": "error", "error": {"code": 4, "message": "invalid API key"}}])
+    assert api.check_acoustid_key() == (True, "invalid fingerprint")
+    assert api.check_acoustid_key() == (False, "invalid API key")
+
+
+def test_clean_key():
+    from rangemusique.config import clean_key
+    assert clean_key(" Ab3_x-Y9\u200b\r\n\u00a0") == "Ab3_x-Y9"

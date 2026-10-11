@@ -256,12 +256,14 @@ class App:
     # ------------------------------------------------------------------ réglages
     def collect_settings(self):
         self.cfg.update(
-            acoustid_key=self.key_var.get().strip(), fpcalc_path=self.fpcalc_var.get().strip(),
+            acoustid_key=config.clean_key(self.key_var.get()), fpcalc_path=self.fpcalc_var.get().strip(),
             source_dir=self.src_var.get().strip(), dest_dir=self.dest_var.get().strip(),
             fast_mode=self.fast_var.get(), write_tags=self.tags_var.get(),
             covers=self.covers_var.get(), cleanup=self.cleanup_var.get(),
         )
         self.api.acoustid_key = self.cfg["acoustid_key"]
+        if self.key_var.get() != self.cfg["acoustid_key"]:
+            self.key_var.set(self.cfg["acoustid_key"])
         try:
             config.save(self.cfg)
         except OSError as e:
@@ -283,14 +285,23 @@ class App:
             return
         self.api.offline = False
         try:
-            ok = self.api.check_acoustid_key()
+            ok, msg = self.api.check_acoustid_key()
         except NetworkError as e:
             messagebox.showerror("AcoustID", f"Impossible de joindre AcoustID :\n{e}")
             return
+        key = self.cfg["acoustid_key"]
         if ok:
             messagebox.showinfo("AcoustID", "La clé fonctionne ✔")
         else:
-            messagebox.showerror("AcoustID", "Clé refusée par AcoustID.")
+            messagebox.showerror(
+                "AcoustID",
+                f"Clé refusée par AcoustID ({msg}).\n\n"
+                f"Clé testée : {key}  ({len(key)} caractères)\n\n"
+                "Attention, il existe deux clés sur acoustid.org :\n"
+                "• « Your API key » sur ta page de compte = clé UTILISATEUR → ne marche pas ici ;\n"
+                "• la clé d'APPLICATION : menu « Applications » → « Register a new application »"
+                " (nom : RangeMusique, version : 1.0), puis copie la clé « API key » de "
+                "cette application.")
 
     def test_fpcalc(self):
         self.collect_settings()
