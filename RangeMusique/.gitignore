@@ -1,0 +1,6 @@
+__pycache__/
+config.json
+cache_musique.sqlite
+cache_pochettes/
+RangeMusique.log
+fpcalc.exe
