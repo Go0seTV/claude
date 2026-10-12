@@ -1,4 +1,7 @@
+import json
 import sqlite3
+
+import requests
 
 import pytest
 
@@ -23,6 +26,34 @@ def media(code, kind=1, caption="Tarte\\nIngrédients :\\n200 g de farine", user
              "video_versions": [{"url": "https://cdn/c2.mp4"}]},
         ]
     return m
+
+
+class FakeResp:
+    def __init__(self, status=200, data=None, location=None):
+        self.status_code = status
+        self._data = data
+        self.headers = {"location": location} if location else {}
+        self.is_redirect = bool(location)
+        self.text = json.dumps(data) if data is not None else "<html>"
+
+    def json(self):
+        if self._data is None:
+            raise ValueError("pas du JSON")
+        return self._data
+
+
+def install_fake_web(monkeypatch, handler):
+    """handler(path, params) -> dict, ou FakeResp, ou lève une exception."""
+    seen = []
+
+    def get(self, url, params=None, **kw):
+        assert url.startswith("https://www.instagram.com/")
+        assert kw.get("timeout") == instagram.API_TIMEOUT
+        seen.append(dict(self.cookies.get_dict()))
+        out = handler(url[len("https://www.instagram.com/"):], dict(params or {}))
+        return out if isinstance(out, FakeResp) else FakeResp(200, out)
+    monkeypatch.setattr(requests.Session, "get", get)
+    return seen
 
 
 @pytest.fixture
@@ -52,11 +83,7 @@ def insta(tmp_path, monkeypatch):
             return {"user": {"username": "moi"}}
         raise AssertionError(path)
 
-    def no_app(path, params):
-        raise AssertionError("l'API de l'appli ne doit pas servir ici")
-
-    monkeypatch.setattr(ins.L.context, "get_json", lambda path, params, **kw: fake_json(path, params))
-    monkeypatch.setattr(ins.L.context, "get_iphone_json", no_app)
+    install_fake_web(monkeypatch, fake_json)
     ins.calls = calls
     return ins
 
@@ -135,32 +162,36 @@ def test_parse_cookie_text():
     assert instagram.cookie_value('"1%3Ax"') == "1%3Ax"
 
 
-def test_web_api_falls_back_to_app_api(tmp_path, monkeypatch):
+def test_api_errors_are_quick_and_clear(tmp_path, monkeypatch):
     import instaloader.exceptions as ie
     ins = Insta(str(tmp_path))
-
-    def web_fails(path, params, **kw):
-        raise ie.ConnectionException('"fail" status, message "something went wrong"')
-    monkeypatch.setattr(ins.L.context, "get_json", web_fails)
-    monkeypatch.setattr(ins.L.context, "get_iphone_json",
-                        lambda path, params: {"items": [], "more_available": False})
-    assert ins.collections() == [(ALL_SAVED, "Tous mes posts enregistrés", None)]
-
-    monkeypatch.setattr(ins.L.context, "get_iphone_json", lambda p, q: web_fails(p, q))
-    with pytest.raises(ie.ConnectionException):
-        ins.collections()
+    answers = {}
+    install_fake_web(monkeypatch, lambda path, params: answers["r"])
+    cases = [
+        (FakeResp(429, {"status": "fail"}), ie.TooManyRequestsException),
+        (FakeResp(302, location="https://www.instagram.com/accounts/login/"),
+         ie.LoginRequiredException),
+        (FakeResp(302, location="https://www.instagram.com/challenge/xyz/"), ie.LoginException),
+        (FakeResp(400, {"message": "checkpoint_required", "status": "fail"}), ie.LoginException),
+        (FakeResp(200, {"status": "fail", "message": "something went wrong"}),
+         ie.ConnectionException),
+        (FakeResp(200, None), ie.ConnectionException),
+    ]
+    for resp, exc in cases:
+        answers["r"] = resp
+        with pytest.raises(exc):
+            ins.collections()
+    assert "vérifier" in instagram.friendly(ie.LoginException("Checkpoint required (x)"))
 
 
 def test_cookie_accepted_even_if_account_name_unreadable(tmp_path, monkeypatch):
-    import instaloader.exceptions as ie
     ins = Insta(str(tmp_path / "s"))
 
-    def web(path, params, **kw):
+    def web(path, params):
         if path == "api/v1/collections/list/":
             return {"items": [], "more_available": False}
-        raise ie.ConnectionException("something went wrong")
-    monkeypatch.setattr(ins.L.context, "get_json", web)
-    monkeypatch.setattr(ins.L.context, "get_iphone_json", lambda p, q: web(p, q))
+        return FakeResp(200, {"status": "fail", "message": "something went wrong"})
+    install_fake_web(monkeypatch, web)
     assert ins.login_with_cookies({"sessionid": "777%3Az"}) == "777"
 
 

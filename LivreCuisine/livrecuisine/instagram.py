@@ -1,8 +1,8 @@
 """Connexion à Instagram et lecture des posts enregistrés, avec Instaloader.
 
 Les collections (« Recettes », « À tester »…) ne sont pas proposées par Instaloader :
-on interroge directement l'API de l'appli Instagram via
-``context.get_iphone_json``, puis on transforme chaque réponse en ``Post``.
+on interroge directement l'API qu'utilise le site instagram.com (``_api``), avec les
+cookies de la session, puis on transforme chaque réponse en ``Post`` d'Instaloader.
 """
 
 import glob
@@ -18,6 +18,7 @@ log = logging.getLogger("livrecuisine")
 
 ALL_SAVED = "__tous__"
 ALL_SAVED_LABEL = "Tous mes posts enregistrés"
+API_TIMEOUT = 20
 
 
 class InstaError(Exception):
@@ -154,29 +155,55 @@ class Insta:
         self.L.context.user_id = None
 
     def _api(self, path, params=None):
-        """Requête à l'API d'Instagram, comme le site web, puis comme l'appli si ça échoue."""
+        """Une requête à l'API utilisée par le site instagram.com, avec les cookies de la session.
+
+        Volontairement sans les nouvelles tentatives ni les longues pauses d'Instaloader :
+        une réponse en 20 secondes au plus, ou une erreur claire.
+        """
         import instaloader.exceptions as ie
-        params = dict(params or {})
+        import requests
+        sess = self.L.context._session
+        url = f"https://www.instagram.com/{path}"
+        headers = {"X-IG-WWW-Claim": "0", "Referer": "https://www.instagram.com/"}
         try:
-            return self.L.context.get_json(path, params)
-        except (ie.TooManyRequestsException, ie.LoginRequiredException,
-                ie.QueryReturnedNotFoundException):
-            raise
-        except ie.InstaloaderException as web_exc:
-            log.warning("API web %s : %s ; essai par l'API de l'appli", path, web_exc)
-            try:
-                return self.L.context.get_iphone_json(path, params)
-            except ie.InstaloaderException as app_exc:
-                log.warning("API appli %s : %s", path, app_exc)
-                raise web_exc
+            resp = sess.get(url, params=dict(params or {}), headers=headers, timeout=API_TIMEOUT,
+                            allow_redirects=False)
+        except requests.exceptions.Timeout:
+            raise ie.ConnectionException(f"Instagram ne répond pas ({path}).")
+        except requests.exceptions.RequestException as exc:
+            raise ie.ConnectionException(f"Pas de connexion à Instagram ({exc}).")
+        body = resp.text[:300].replace("\n", " ")
+        log.info("Instagram %s -> %s", path, resp.status_code)
+        if resp.is_redirect:
+            where = resp.headers.get("location", "")
+            if "challenge" in where or "checkpoint" in where or "auth_platform" in where:
+                raise ie.LoginException(f"Checkpoint required ({where})")
+            raise ie.LoginRequiredException(f"login_required : redirection vers {where}")
+        if resp.status_code == 429:
+            raise ie.TooManyRequestsException(f"429 Too Many Requests ({path})")
+        if resp.status_code in (401, 403):
+            raise ie.LoginRequiredException(f"login_required : {resp.status_code} {body}")
+        if resp.status_code == 404:
+            raise ie.QueryReturnedNotFoundException(f"404 ({path})")
+        try:
+            data = resp.json()
+        except ValueError:
+            raise ie.ConnectionException(f"Réponse inattendue d'Instagram ({resp.status_code}) : "
+                                         f"{body}")
+        message = str(data.get("message", "")) if isinstance(data, dict) else ""
+        if any(w in message for w in ("checkpoint", "challenge", "feedback_required")):
+            raise ie.LoginException(f"Checkpoint required : {message}")
+        if "login_required" in message:
+            raise ie.LoginRequiredException("login_required")
+        if resp.status_code != 200 or (isinstance(data, dict) and data.get("status") == "fail"):
+            raise ie.ConnectionException(f"{resp.status_code} {message or body} ({path})")
+        return data
 
     def current_user(self):
         """Nom du compte connecté."""
         uid = self.L.context.user_id
         tries = [("api/v1/accounts/edit/web_form_data/", {},
-                  lambda d: d["form_data"]["username"]),
-                 ("api/v1/accounts/current_user/", {"edit": "true"},
-                  lambda d: d["user"]["username"])]
+                  lambda d: d["form_data"]["username"])]
         if uid:
             tries.insert(0, (f"api/v1/users/{uid}/info/", {}, lambda d: d["user"]["username"]))
         error = None
