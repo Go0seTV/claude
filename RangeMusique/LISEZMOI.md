@@ -87,8 +87,12 @@ Formats gérés : MP3, FLAC, M4A/AAC/ALAC, OGG, Opus, WMA, WAV, AIFF, APE, WavPa
 
 ### Ensuite
 - Écoute ce qu'il y a dans `_Doublons`, puis supprime-le quand tu es sûr.
-- Pour les morceaux de `_À vérifier`, relance une analyse sur ce dossier et corrige-les
-  à la main (double-clic), puis range-les.
+- Pour les morceaux de `_À vérifier` : choisis ce dossier `_À vérifier` comme **dossier de
+  ta musique**, analyse-le, corrige les morceaux d'un double-clic, puis range-les en gardant
+  `Musique rangée` comme destination.
+- Tu peux aussi **réanalyser tout le dossier rangé** pour compléter les tags. Choisis
+  `Musique rangée` à la fois comme dossier de ta musique et comme destination. Les fichiers
+  déjà bien placés ne bougent pas, et le dossier `_Doublons` est ignoré.
 
 ---
 

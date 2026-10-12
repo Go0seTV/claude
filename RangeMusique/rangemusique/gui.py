@@ -414,6 +414,12 @@ class App:
     def _analyse_done(self, tracks):
         self.tracks = tracks
         self.refresh_tracks()
+        if not tracks:
+            self.status.set("Aucun fichier audio trouvé.")
+            messagebox.showwarning(
+                "Analyse", "Aucun fichier audio trouvé dans ce dossier.\n\n"
+                           "(Les sous-dossiers _Doublons et _Journal sont ignorés.)")
+            return
         counts = {}
         for t in tracks:
             counts[t.confidence] = counts.get(t.confidence, 0) + 1
@@ -496,16 +502,9 @@ class App:
     # ------------------------------------------------------------------ rangement
     def _check_dest(self):
         self.collect_settings()
-        src, dest = self.cfg["source_dir"], self.cfg["dest_dir"]
+        dest = self.cfg["dest_dir"]
         if not dest:
             messagebox.showwarning("Destination", "Choisis un dossier de destination.")
-            return None
-        a = os.path.normcase(os.path.abspath(src))
-        b = os.path.normcase(os.path.abspath(dest))
-        if a == b or a.startswith(b + os.sep):
-            messagebox.showwarning(
-                "Destination", "Choisis un NOUVEAU dossier de destination, distinct du "
-                               "dossier de ta musique (par exemple « D:\\Musique rangée »).")
             return None
         return dest
 

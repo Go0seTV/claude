@@ -137,10 +137,13 @@ def build_plan(tracks, dest):
 
     used = set()
 
-    def unique(path):
+    def unique(path, own=None):
+        """Chemin libre ; le fichier lui-même peut garder sa place actuelle."""
         base, ext = os.path.splitext(path)
         candidate, i = path, 2
-        while os.path.normcase(candidate) in used or os.path.exists(candidate):
+        own = os.path.normcase(own) if own else None
+        while os.path.normcase(candidate) in used or (
+                os.path.exists(candidate) and os.path.normcase(candidate) != own):
             candidate = f"{base} ({i}){ext}"
             i += 1
         used.add(os.path.normcase(candidate))
@@ -155,20 +158,22 @@ def build_plan(tracks, dest):
             label = " - ".join(x for x in (artist, src.get("title")) if x) or \
                 os.path.splitext(t.filename)[0]
             name = safe_name(f"{label} ({quality_label(t)})", maxlen=120) + t.ext
-            plan.append(PlanItem(t, DUPLICATE, unique(os.path.join(dest, DUP_DIR, name)),
+            dup_path = unique(os.path.join(dest, DUP_DIR, name), own=t.path)
+            plan.append(PlanItem(t, DUPLICATE, dup_path,
                                  f"{why} – on garde : {kept.filename} ({quality_label(kept)})",
                                  kept))
         elif t.is_ok():
             artist = artist_names[norm(t.new["albumartist"]) or t.new["albumartist"]]
             album = album_names[(norm(artist), norm(t.new["album"]))]
             folder = os.path.join(dest, safe_name(artist), safe_name(album, maxlen=100))
-            path = unique(os.path.join(folder, _track_filename(t.new, t.ext)))
+            path = unique(os.path.join(folder, _track_filename(t.new, t.ext)), own=t.path)
             reason = {"sûr": f"reconnu ({t.method})", "tags": "tags d'origine",
                       "manuel": "corrigé à la main"}.get(t.confidence, t.confidence)
             plan.append(PlanItem(t, MOVE, path, reason))
         else:
             reason = t.error or t.note or "morceau non reconnu avec certitude"
-            plan.append(PlanItem(t, REVIEW, unique(os.path.join(dest, REVIEW_DIR, t.filename)),
+            review_path = unique(os.path.join(dest, REVIEW_DIR, t.filename), own=t.path)
+            plan.append(PlanItem(t, REVIEW, review_path,
                                  reason))
     return plan
 

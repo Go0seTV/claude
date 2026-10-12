@@ -233,3 +233,48 @@ def test_compilation_folder_still_goes_to_original_album(tmp_path, make_audio, m
     monkeypatch.setattr(identify, "fingerprint", lambda f, p, timeout=120: (3.0, "fp440"))
     [t] = identify.analyze(str(src), identify.Identifier(FakeAPI(), "fpcalc"))
     assert t.new["album"].startswith("Top Gun")
+
+
+def test_reanalyse_and_rerange_the_organised_folder(library, tmp_path):
+    """Bug signalé : analyser le dossier rangé (qui est aussi la destination
+    réglée) ne trouvait aucun fichier."""
+    src, dest = str(library), str(tmp_path / "Musique rangée")
+    api = FakeAPI()
+    tracks = identify.analyze(src, identify.Identifier(api, "fpcalc"), exclude=[dest])
+    executor.execute(planner.build_plan(tracks, dest), src, dest, api)
+    first = rel_files(dest)
+
+    # 1. réanalyse du dossier rangé, avec la même destination réglée
+    again = identify.analyze(dest, identify.Identifier(api, "fpcalc"), exclude=[dest])
+    names = {os.path.relpath(t.path, dest).replace(os.sep, "/") for t in again}
+    assert "Berlin/Top Gun - Original Motion Picture Soundtrack/03 - Take My Breath Away.flac" \
+        in names
+    assert "_À vérifier/zzz.ogg" in names
+    assert not any(n.startswith("_Doublons/") for n in names)  # doublons ignorés
+
+    # 2. rangement sur place : rien ne bouge, rien n'est renommé en « (2) »
+    plan = planner.build_plan(again, dest)
+    ranged = [it for it in plan if it.action == planner.MOVE]
+    assert ranged and all(os.path.normcase(it.dest) == os.path.normcase(it.track.path)
+                          for it in ranged)
+    report = executor.execute(plan, dest, dest, api)
+    assert not report["errors"], report["errors"]
+    after = {f for f in rel_files(dest) if not f.startswith("_Journal/")}
+    assert after == {f for f in first if not f.startswith("_Journal/")}
+
+
+def test_fix_review_folder_then_range(library, tmp_path):
+    """Corriger un morceau de _À vérifier puis le ranger dans la destination."""
+    src, dest = str(library), str(tmp_path / "Musique rangée")
+    api = FakeAPI()
+    tracks = identify.analyze(src, identify.Identifier(api, "fpcalc"), exclude=[dest])
+    executor.execute(planner.build_plan(tracks, dest), src, dest, api)
+
+    review = os.path.join(dest, "_À vérifier")
+    [t] = identify.analyze(review, identify.Identifier(api, "fpcalc"), exclude=[dest])
+    identify.set_manual(t, {"artist": "Daft Punk", "title": "Da Funk",
+                            "album": "Homework", "track": 7, "year": "1997"})
+    report = executor.execute(planner.build_plan([t], dest), review, dest, api)
+    assert not report["errors"], report["errors"]
+    assert "Daft Punk/Homework/07 - Da Funk.ogg" in rel_files(dest)
+    assert os.path.isdir(review)  # le dossier analysé lui-même est gardé

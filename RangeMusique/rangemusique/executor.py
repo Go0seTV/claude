@@ -61,12 +61,16 @@ def execute(plan, source, dest, api=None, write_tags=True, covers=True, cleanup=
                 break
             t = it.track
             progress(i, n, t.filename)
+            in_place = os.path.normcase(os.path.abspath(t.path)) == \
+                os.path.normcase(os.path.abspath(it.dest))
             try:
-                _move(t.path, it.dest)
+                if not in_place:
+                    _move(t.path, it.dest)
             except Exception as e:
                 report["errors"].append(f"{t.path} : {e}")
                 continue
-            entry = {"op": "move", "src": t.path, "dst": it.dest, "action": it.action}
+            entry = {"op": "tags" if in_place else "move", "src": t.path, "dst": it.dest,
+                     "action": it.action}
             if it.action == MOVE and write_tags:
                 cover = None
                 c = t.chosen
@@ -98,7 +102,7 @@ def execute(plan, source, dest, api=None, write_tags=True, covers=True, cleanup=
 
         _write_review_list(plan, dest)
         if cleanup:
-            removed = remove_empty_dirs(source, keep_root=True, exclude=dest)
+            removed = remove_empty_dirs(source, keep_root=True, protect=dest)
             for d in removed:
                 journal.add(op="rmdir", path=d)
             report["removed_dirs"] = len(removed)
@@ -155,15 +159,18 @@ def _write_review_list(plan, dest):
             w.writerow([os.path.basename(it.dest), it.reason] + sugg)
 
 
-def remove_empty_dirs(root, keep_root=True, exclude=None, delete_junk=True):
+def remove_empty_dirs(root, keep_root=True, protect=None, delete_junk=True):
     """Supprime les dossiers devenus vides (ou ne contenant que des fichiers
-    inutiles : Thumbs.db, desktop.ini, .m3u…). Renvoie la liste supprimée."""
+    inutiles : Thumbs.db, desktop.ini, .m3u…). Le dossier `protect` (la
+    destination) et son _Journal ne sont jamais supprimés. Renvoie la liste
+    des dossiers supprimés."""
     root = os.path.abspath(root)
-    excl = os.path.normcase(os.path.abspath(exclude)) if exclude else None
+    prot = os.path.normcase(os.path.abspath(protect)) if protect else None
     removed = []
     for dirpath, dirnames, filenames in os.walk(root, topdown=False):
         nd = os.path.normcase(os.path.abspath(dirpath))
-        if excl and (nd == excl or nd.startswith(excl + os.sep) or excl.startswith(nd + os.sep)):
+        if prot and (nd == prot or prot.startswith(nd + os.sep) or
+                     nd == os.path.join(prot, os.path.normcase(JOURNAL_DIR))):
             continue
         if keep_root and nd == os.path.normcase(root):
             continue
@@ -217,6 +224,10 @@ def undo(journal_path, progress=None):
             elif e["op"] == "cover":
                 if os.path.exists(e["path"]):
                     os.remove(e["path"])
+            elif e["op"] == "tags":
+                if e.get("old_tags") and os.path.exists(e["dst"]):
+                    tagio.write(e["dst"], e["old_tags"], clear_empty=True)
+                    restored += 1
             elif e["op"] == "move":
                 if not os.path.exists(e["dst"]):
                     errors.append(f"introuvable : {e['dst']}")

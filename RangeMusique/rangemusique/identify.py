@@ -102,18 +102,30 @@ class Track:
 
 # --- Parcours ------------------------------------------------------------------
 
+SKIP_DIRS = {"_doublons", "_journal"}
+
+
 def scan(root, exclude=()):
-    """Liste les fichiers audio sous root (en ignorant les dossiers exclus)."""
+    """Liste les fichiers audio sous root.
+
+    Les dossiers exclus (le dossier de destination quand il se trouve DANS le
+    dossier analysé) et les dossiers _Doublons / _Journal sont ignorés. Le
+    dossier analysé lui-même n'est jamais exclu : on peut réanalyser le
+    dossier déjà rangé ou son sous-dossier _À vérifier.
+    """
     root = os.path.abspath(root)
+    nroot = os.path.normcase(root)
     excl = [os.path.normcase(os.path.abspath(e)) for e in exclude if e]
+    excl = [e for e in excl if e.startswith(nroot + os.sep)]
     out = []
     for dirpath, dirnames, filenames in os.walk(root):
         nd = os.path.normcase(os.path.abspath(dirpath))
         dirnames[:] = [
             d for d in sorted(dirnames)
-            if not any(os.path.normcase(os.path.join(dirpath, d)) == e or
-                       os.path.normcase(os.path.join(dirpath, d)).startswith(e + os.sep)
-                       for e in excl)
+            if d.lower() not in SKIP_DIRS and
+            not any(os.path.normcase(os.path.join(dirpath, d)) == e or
+                    os.path.normcase(os.path.join(dirpath, d)).startswith(e + os.sep)
+                    for e in excl)
         ]
         if any(nd == e or nd.startswith(e + os.sep) for e in excl):
             continue
