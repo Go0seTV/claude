@@ -54,7 +54,8 @@ Formats gérés : MP3, FLAC, M4A/AAC/ALAC, OGG, Opus, WMA, WAV, AIFF, APE, WavPa
      et regroupe les morceaux d'un même album rippé.
 3. Les couleurs du tableau :
    - 🟩 **Reconnu** : sûr ;
-   - 🟦 **Tags d'origine** : pas trouvé en ligne, mais les tags du fichier sont complets ;
+   - 🟦 **Tags / nom fichier** : pas trouvé en ligne, mais l'artiste et le titre sont connus
+     grâce aux tags du fichier et à son nom ;
    - 🟧 **À vérifier** / 🟥 **Inconnu** : double-clique pour corriger. Tu peux **▶ écouter**
      le morceau et choisir une suggestion.
 4. Bouton facultatif : **Écrire les tags dans les fichiers (sans les déplacer)**, si tu veux
@@ -105,6 +106,8 @@ Formats gérés : MP3, FLAC, M4A/AAC/ALAC, OGG, Opus, WMA, WAV, AIFF, APE, WavPa
 | Même chanson présente sur une compilation et sur l'album original | l'album original |
 | Album sur plusieurs CD | `1-01 - Titre`, `2-01 - Titre`… dans un seul dossier |
 | « BERLIN » et « Berlin » | un seul dossier |
+| Morceau inconnu en ligne (sketch, rareté) avec tags incomplets | complété avec le nom du fichier : `François Pérusse - Horscope.mp3` → artiste + titre |
+| Pas d'album connu | `Artiste\Divers\Titre` |
 | Version live / remix (durée différente) | pas considérée comme un doublon |
 | Caractères interdits par Windows (`AC/DC`, `:`) | remplacés (`AC-DC`) |
 

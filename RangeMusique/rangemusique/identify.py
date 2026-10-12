@@ -95,8 +95,9 @@ class Track:
         return os.path.basename(self.path)
 
     def is_ok(self):
+        """Prêt à ranger : artiste + titre connus (sans album -> dossier « Divers »)."""
         return self.confidence in OK_LEVELS and bool(
-            self.new.get("albumartist") and self.new.get("title") and self.new.get("album")
+            self.new.get("albumartist") and self.new.get("title")
         )
 
 
@@ -426,12 +427,26 @@ def finalize(t):
         t.confidence = SURE if (sure and c.album) else UNSURE
         if t.confidence == SURE:
             return
-    # Pas de reconnaissance certaine : les tags existants suffisent-ils ?
-    artist = o.get("artist") or o.get("albumartist")
-    if o.get("title") and artist and o.get("album"):
+    # Pas de reconnaissance certaine : on combine les tags existants et le nom
+    # du fichier (« François Pérusse - Horscope.mp3 » donne artiste + titre).
+    f = t.fname
+    title = o.get("title") or f.get("title", "")
+    artist = o.get("artist") or o.get("albumartist") or f.get("artist", "")
+    # l'album deviné dans le nom (« Artiste - Album - Titre ») seulement si le
+    # titre vient lui aussi du nom du fichier
+    album = o.get("album") or ("" if o.get("title") else f.get("album", ""))
+    if c:
+        # une suggestion en ligne existe mais n'est pas sûre : on n'accepte que
+        # des tags d'origine complets, sinon le morceau reste « à vérifier »
+        title, artist, album = o.get("title"), o.get("artist") or o.get("albumartist"), \
+            o.get("album")
+        enough = bool(title and artist and album)
+    else:
+        enough = bool(title and artist)
+    if enough:
         t.new = {
-            "title": o["title"], "artist": artist,
-            "albumartist": main_artist(artist), "album": o["album"],
+            "title": title, "artist": artist,
+            "albumartist": main_artist(artist), "album": album,
             "track": o.get("track") or t.fname.get("track"), "tracktotal": o.get("tracktotal"),
             "disc": o.get("disc") if (o.get("disctotal") or 1) > 1 else None,
             "disctotal": o.get("disctotal") if (o.get("disctotal") or 1) > 1 else None,

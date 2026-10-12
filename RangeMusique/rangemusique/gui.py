@@ -18,7 +18,7 @@ log = logging.getLogger("rangemusique")
 
 STATUS_LABELS = {
     identify.SURE: "Reconnu",
-    identify.TAGS: "Tags d'origine",
+    identify.TAGS: "Tags / nom fichier",
     identify.MANUAL: "Corrigé à la main",
     identify.UNSURE: "À vérifier",
     identify.UNKNOWN: "Inconnu",
@@ -425,7 +425,7 @@ class App:
             counts[t.confidence] = counts.get(t.confidence, 0) + 1
         msg = (f"{len(tracks)} morceaux analysés : "
                f"{counts.get(identify.SURE, 0)} reconnus, "
-               f"{counts.get(identify.TAGS, 0)} gardés avec leurs tags, "
+               f"{counts.get(identify.TAGS, 0)} complétés avec tags / nom de fichier, "
                f"{counts.get(identify.UNSURE, 0) + counts.get(identify.UNKNOWN, 0)} à vérifier.")
         if self.api.offline:
             msg += "  ⚠ Internet injoignable : reconnaissance en ligne interrompue."
@@ -697,9 +697,10 @@ class EditDialog:
 
     def _save(self):
         v = {k: var.get().strip() for k, var in self.vars.items()}
-        if not (v["artist"] and v["title"] and v["album"]):
-            messagebox.showwarning("Incomplet", "Artiste, titre et album sont obligatoires.",
-                                   parent=self.top)
+        if not (v["artist"] and v["title"]):
+            messagebox.showwarning("Incomplet", "L'artiste et le titre sont obligatoires "
+                                                "(sans album, le morceau ira dans "
+                                                "Artiste\\Divers).", parent=self.top)
             return
         try:
             v["track"] = int(v["track"]) if v["track"] else None

@@ -166,4 +166,4 @@ def clean_folder_name(name):
 
 def year_of(date):
     m = re.match(r"\s*(\d{4})", str(date or ""))
-    return m.group(1) if m else ""
+    return m.group(1) if m and 1900 <= int(m.group(1)) <= 2100 else ""

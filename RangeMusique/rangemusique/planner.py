@@ -18,6 +18,7 @@ MOVE = "Ranger"
 DUPLICATE = "Doublon"
 REVIEW = "À vérifier"
 
+NO_ALBUM_DIR = "Divers"  # morceaux sans album : Artiste\\Divers\\Titre
 DUP_DIR = "_Doublons"
 REVIEW_DIR = "_À vérifier"
 JOURNAL_DIR = "_Journal"
@@ -165,10 +166,13 @@ def build_plan(tracks, dest):
         elif t.is_ok():
             artist = artist_names[norm(t.new["albumartist"]) or t.new["albumartist"]]
             album = album_names[(norm(artist), norm(t.new["album"]))]
-            folder = os.path.join(dest, safe_name(artist), safe_name(album, maxlen=100))
+            folder = os.path.join(dest, safe_name(artist),
+                                  safe_name(album or NO_ALBUM_DIR, maxlen=100))
             path = unique(os.path.join(folder, _track_filename(t.new, t.ext)), own=t.path)
-            reason = {"sûr": f"reconnu ({t.method})", "tags": "tags d'origine",
+            reason = {"sûr": f"reconnu ({t.method})", "tags": "tags / nom du fichier",
                       "manuel": "corrigé à la main"}.get(t.confidence, t.confidence)
+            if not t.new.get("album"):
+                reason += " – sans album"
             plan.append(PlanItem(t, MOVE, path, reason))
         else:
             reason = t.error or t.note or "morceau non reconnu avec certitude"

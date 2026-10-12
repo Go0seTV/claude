@@ -278,3 +278,53 @@ def test_fix_review_folder_then_range(library, tmp_path):
     assert not report["errors"], report["errors"]
     assert "Daft Punk/Homework/07 - Da Funk.ogg" in rel_files(dest)
     assert os.path.isdir(review)  # le dossier analysé lui-même est gardé
+
+
+def test_offline_tracks_completed_from_filename(tmp_path, make_audio):
+    """Cas réel : sketchs de François Pérusse, inconnus en ligne, avec des tags
+    partiels. Le nom du fichier doit compléter les tags."""
+    src = tmp_path / "_À vérifier"
+    a = make_audio(src / "François Pérusse - Horscope.mp3", freq=300)
+    tagio.write(a, {"artist": "François Pérusse", "album": "Les deux minutes du peuple"})
+    b = make_audio(src / "François Pérusse - Je bricole.mp3", freq=310)
+    tagio.write(b, {"artist": "François Pérusse", "title": "Je bricole", "year": "2001"})
+    c = make_audio(src / "François Pérusse - L'Hôpital - Dans les Couloirs.mp3", freq=320)
+    tagio.write(c, {"artist": "François Pérusse", "title": "L'Hôpital - Dans les Couloirs",
+                    "year": "0099"})
+    make_audio(src / "François Pérusse - Jacques Cartier 2.mp3", freq=330)  # aucun tag
+
+    api = FakeAPI()
+    tracks = identify.analyze(str(src), identify.Identifier(api, fpcalc=""))
+    by = {t.filename: t for t in tracks}
+    assert all(t.confidence == identify.TAGS and t.is_ok() for t in tracks)
+    assert by["François Pérusse - Horscope.mp3"].new["title"] == "Horscope"
+    assert by["François Pérusse - Horscope.mp3"].new["album"] == "Les deux minutes du peuple"
+    assert by["François Pérusse - Je bricole.mp3"].new["album"] == ""
+    cart = by["François Pérusse - Jacques Cartier 2.mp3"].new
+    assert cart["artist"] == "François Pérusse" and cart["title"] == "Jacques Cartier 2"
+    hop = by["François Pérusse - L'Hôpital - Dans les Couloirs.mp3"].new
+    assert hop["album"] == "" and hop["year"] == ""  # pas d'album inventé, 0099 ignoré
+
+    dest = str(tmp_path / "Musique rangée")
+    report = executor.execute(planner.build_plan(tracks, dest), str(src), dest, api)
+    assert not report["errors"], report["errors"]
+    files = rel_files(dest)
+    assert "François Pérusse/Les deux minutes du peuple/Horscope.mp3" in files
+    assert "François Pérusse/Divers/Je bricole.mp3" in files
+    assert "François Pérusse/Divers/Jacques Cartier 2.mp3" in files
+    tags, _, _ = tagio.read(os.path.join(dest, "François Pérusse", "Les deux minutes du peuple",
+                                         "Horscope.mp3"))
+    assert tags["title"] == "Horscope" and tags["albumartist"] == "François Pérusse"
+
+
+def test_unsure_online_match_with_partial_tags_stays_in_review(tmp_path, make_audio,
+                                                               monkeypatch):
+    """Empreinte peu sûre + tags incomplets => reste « à vérifier »."""
+    src = tmp_path / "M"
+    p = make_audio(src / "François Pérusse - L'ambiance de la situtation.mp3", freq=440)
+    tagio.write(p, {"artist": "François Pérusse"})
+    monkeypatch.setattr(identify, "fingerprint", lambda f, x, timeout=120: (3.0, "fp440"))
+    api = FakeAPI()
+    monkeypatch.setattr(api, "acoustid_lookup", lambda d, fp: [(0.6, ["rec-tmba"])])
+    [t] = identify.analyze(str(src), identify.Identifier(api, "fpcalc"))
+    assert t.confidence == identify.UNSURE and not t.is_ok()
