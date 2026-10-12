@@ -12,6 +12,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import time
 import urllib.parse
 
 log = logging.getLogger("livrecuisine")
@@ -19,6 +20,8 @@ log = logging.getLogger("livrecuisine")
 ALL_SAVED = "__tous__"
 ALL_SAVED_LABEL = "Tous mes posts enregistrés"
 API_TIMEOUT = 20
+PAGE_PAUSE = 1.0             # secondes entre deux pages de posts
+COLLECTION_SCAN_PAGES = 5    # pages lues pour retrouver les collections sans leur liste
 # Instaloader se présente comme Chrome sous Linux : sur un PC Windows, ça ressemble à un
 # appareil inconnu. On prend l'identité du navigateur quand on l'a (copie cURL), sinon celle-ci.
 DEFAULT_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -65,7 +68,10 @@ def friendly(exc):
                     "connecte-toi à instagram.com dans ton navigateur et suis les étapes.")
         return f"Connexion refusée par Instagram : {msg}"
     if isinstance(exc, ie.QueryReturnedNotFoundException):
-        return "Post introuvable (supprimé ou compte privé)."
+        if "/media/" in msg or "Post" in msg:
+            return "Post introuvable (supprimé ou compte privé)."
+        return ("Instagram ne propose plus cette fonction (erreur 404). Le détail est dans "
+                "LivreCuisine.log : envoie-le pour que le logiciel soit corrigé.")
     if isinstance(exc, ie.ConnectionException):
         return f"Problème de connexion avec Instagram : {msg}"
     return f"{type(exc).__name__} : {msg}"
@@ -81,6 +87,7 @@ class Insta:
             save_metadata=False, compress_json=False, max_connection_attempts=3,
             request_timeout=60.0, iphone_support=True, user_agent=DEFAULT_USER_AGENT)
         self.pending_user = None
+        self.notify = lambda message: None  # messages pour le journal de l'appli
 
     # ------------------------------------------------------------- connexion
     @property
@@ -260,36 +267,96 @@ class Insta:
             if not data.get("more_available") or not nxt:
                 return
             params["max_id"] = nxt
+            time.sleep(PAGE_PAUSE)
 
     def collections(self):
-        """[(id, nom, nombre de posts ou None)], « Tous mes posts enregistrés » en premier."""
+        """[(id, nom, nombre de posts ou None)], « Tous mes posts enregistrés » en premier.
+
+        Si Instagram ne donne plus la liste, on retrouve les collections à partir des posts
+        enregistrés (sans leur nom : il suffit alors de coller le lien de la collection)."""
+        import instaloader.exceptions as ie
         out = [(ALL_SAVED, ALL_SAVED_LABEL, None)]
         params = {"collection_types": '["ALL_MEDIA_AUTO_COLLECTION","MEDIA"]',
                   "include_public_only": "0", "get_cover_media_lists": "false"}
-        for page in self._pages("api/v1/collections/list/", params):
-            for c in page.get("items", []):
-                if c.get("collection_type") == "ALL_MEDIA_AUTO_COLLECTION":
-                    continue
-                cid = str(c.get("collection_id") or c.get("collection_pk") or "")
-                if cid:
-                    out.append((cid, c.get("collection_name") or "?",
-                                c.get("collection_media_count")))
+        try:
+            for page in self._pages("api/v1/collections/list/", params):
+                for c in page.get("items", []):
+                    if c.get("collection_type") == "ALL_MEDIA_AUTO_COLLECTION":
+                        continue
+                    cid = str(c.get("collection_id") or c.get("collection_pk") or "")
+                    if cid:
+                        out.append((cid, c.get("collection_name") or "?",
+                                    c.get("collection_media_count")))
+            return out
+        except ie.TooManyRequestsException:
+            raise
+        except (ie.QueryReturnedNotFoundException, ie.ConnectionException) as exc:
+            log.warning("Liste des collections indisponible (%s) : on regarde les posts", exc)
+        counts = {}
+        for i, page in enumerate(self._pages("api/v1/feed/saved/posts/")):
+            for item in page.get("items", []):
+                for cid in _collection_ids(item) or ():
+                    counts[cid] = counts.get(cid, 0) + 1
+            if i + 1 >= COLLECTION_SCAN_PAGES:
+                break
+        ranked = sorted(counts, key=lambda c: -counts[c])
+        out += [(cid, f"Collection {n} (nom inconnu)", None) for n, cid in enumerate(ranked, 1)]
         return out
 
     def iter_posts(self, collection_id):
         """Posts d'une collection, du plus récemment enregistré au plus ancien."""
         from instaloader import Post
+        for item in self._feed_items(collection_id):
+            media = _normalize(item.get("media", item))
+            try:
+                yield Post.from_iphone_struct(self.L.context, media)
+            except (KeyError, TypeError) as exc:
+                log.warning("Post ignoré (format inattendu %s) : %s", exc, media.get("code"))
+
+    def _feed_items(self, collection_id):
+        import instaloader.exceptions as ie
+        saved = "api/v1/feed/saved/posts/"
         if collection_id == ALL_SAVED:
-            path = "api/v1/feed/saved/posts/"
-        else:
-            path = f"api/v1/feed/collection/{collection_id}/posts/"
-        for page in self._pages(path):
+            for page in self._pages(saved):
+                yield from page.get("items", [])
+            return
+        pages = self._pages(f"api/v1/feed/collection/{collection_id}/posts/")
+        try:
+            first = next(pages, None)
+        except ie.TooManyRequestsException:
+            raise
+        except (ie.QueryReturnedNotFoundException, ie.ConnectionException) as exc:
+            log.warning("Collection %s illisible directement (%s)", collection_id, exc)
+            first = False
+        if first is not False:
+            if first is None:
+                return
+            yield from first.get("items", [])
+            for page in pages:
+                yield from page.get("items", [])
+            return
+
+        # Instagram a retiré la lecture d'une collection : on parcourt tous les posts
+        # enregistrés et on garde ceux qui sont rangés dans la collection.
+        self.notify("Instagram ne permet plus de lire une collection directement : je parcours "
+                    "tous tes posts enregistrés et je garde ceux de ta collection (plus long).")
+        seen = found = unknown = 0
+        for n, page in enumerate(self._pages(saved), 1):
             for item in page.get("items", []):
-                media = _normalize(item.get("media", item))
-                try:
-                    yield Post.from_iphone_struct(self.L.context, media)
-                except (KeyError, TypeError) as exc:
-                    log.warning("Post ignoré (format inattendu %s) : %s", exc, media.get("code"))
+                seen += 1
+                ids = _collection_ids(item)
+                if ids is None:
+                    unknown += 1
+                elif str(collection_id) in ids:
+                    found += 1
+                    yield item
+            if n % 5 == 0:
+                self.notify(f"   {seen} posts enregistrés parcourus, {found} dans ta collection…")
+        if seen and unknown == seen:
+            raise InstaError("Instagram n'indique plus dans quelle collection est rangé chaque "
+                             "post. Choisis « Tous mes posts enregistrés » à l'étape 2 : les "
+                             "posts qui ne sont pas des recettes seront mis de côté.")
+        self.notify(f"   {seen} posts enregistrés parcourus, {found} dans ta collection.")
 
     def post_from_link(self, link):
         from instaloader import Post
@@ -342,6 +409,24 @@ class Insta:
             shutil.copyfileobj(resp.raw, fh)
         os.replace(tmp, path)
         return path
+
+
+def _collection_ids(item):
+    """Collections où le post est rangé (liste de textes), ou None si Instagram ne le dit pas."""
+    media = item.get("media", item) if isinstance(item, dict) else {}
+    ids = media.get("saved_collection_ids", item.get("saved_collection_ids"))
+    return None if ids is None else [str(i) for i in ids]
+
+
+def collection_from_link(text):
+    """Lien d'une collection (instagram.com/moi/saved/recettes/1789…/) -> (id, nom)."""
+    m = re.search(r"instagram\.com/[\w.]+/saved/([^/?#\s]+)/(\d+)", text or "")
+    if m:
+        name = urllib.parse.unquote(m.group(1)).replace("-", " ").replace("_", " ").strip()
+        return m.group(2), (name[:1].upper() + name[1:]) if name else "Ma collection"
+    if re.search(r"instagram\.com/[\w.]+/saved/all-posts", text or ""):
+        return ALL_SAVED, ALL_SAVED_LABEL
+    return None
 
 
 def cookie_value(value):

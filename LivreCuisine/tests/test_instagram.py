@@ -251,3 +251,74 @@ def test_curl_login_sends_all_cookies_and_browser_identity(insta, tmp_path, monk
 
 def test_default_identity_is_windows():
     assert "Windows" in instagram.DEFAULT_USER_AGENT
+
+
+@pytest.fixture(autouse=True)
+def no_page_pause(monkeypatch):
+    monkeypatch.setattr(instagram, "PAGE_PAUSE", 0)
+
+
+def saved_feed_handler(with_ids=True):
+    """Comme Instagram aujourd'hui : plus de liste des collections ni de lecture directe."""
+    pages = [
+        [("R1", ["555"]), ("X1", ["999"]), ("R2", ["555", "999"])],
+        [("X2", []), ("R3", [555])],
+    ]
+
+    def handler(path, params):
+        if path in ("api/v1/collections/list/", "api/v1/feed/collection/555/posts/"):
+            return FakeResp(404, {"status": "fail", "message": "Dead endpoint"})
+        if path == "api/v1/feed/saved/posts/":
+            n = 1 if params.get("max_id") == "p2" else 0
+            items = []
+            for code, ids in pages[n]:
+                m = media(code)
+                if with_ids:
+                    m["saved_collection_ids"] = ids
+                items.append({"media": m})
+            return {"items": items, "more_available": n == 0, "next_max_id": "p2" if n == 0 else None}
+        raise AssertionError(path)
+    return handler
+
+
+def test_collections_rebuilt_from_saved_posts(tmp_path, monkeypatch):
+    ins = Insta(str(tmp_path))
+    install_fake_web(monkeypatch, saved_feed_handler())
+    assert ins.collections() == [(ALL_SAVED, "Tous mes posts enregistrés", None),
+                                 ("555", "Collection 1 (nom inconnu)", None),
+                                 ("999", "Collection 2 (nom inconnu)", None)]
+
+
+def test_collection_posts_filtered_from_saved_posts(tmp_path, monkeypatch):
+    ins = Insta(str(tmp_path))
+    said = []
+    ins.notify = said.append
+    install_fake_web(monkeypatch, saved_feed_handler())
+    assert [p.shortcode for p in ins.iter_posts("555")] == ["R1", "R2", "R3"]
+    assert "parcours tous tes posts" in said[0]
+    assert "5 posts enregistrés parcourus, 3 dans ta collection." in said[-1]
+    assert [p.shortcode for p in ins.iter_posts(ALL_SAVED)] == ["R1", "X1", "R2", "X2", "R3"]
+
+
+def test_collection_filter_without_ids_says_what_to_do(tmp_path, monkeypatch):
+    ins = Insta(str(tmp_path))
+    install_fake_web(monkeypatch, saved_feed_handler(with_ids=False))
+    with pytest.raises(InstaError, match="Tous mes posts"):
+        list(ins.iter_posts("555"))
+
+
+def test_collection_from_link():
+    assert instagram.collection_from_link(
+        "https://www.instagram.com/go0se/saved/recettes-faciles/17912345678901234/") == (
+        "17912345678901234", "Recettes faciles")
+    assert instagram.collection_from_link(
+        "https://www.instagram.com/go0se/saved/r%C3%A9gal/1791/?hl=fr") == ("1791", "Régal")
+    assert instagram.collection_from_link("https://www.instagram.com/go0se/saved/all-posts/") == (
+        ALL_SAVED, "Tous mes posts enregistrés")
+    assert instagram.collection_from_link("https://www.instagram.com/p/ABC/") is None
+
+
+def test_friendly_404_is_not_always_a_post():
+    import instaloader.exceptions as ie
+    assert "404" in instagram.friendly(ie.QueryReturnedNotFoundException("404 (api/v1/collections/list/)"))
+    assert "Post" in instagram.friendly(ie.QueryReturnedNotFoundException("404 (api/v1/media/1/info/)"))

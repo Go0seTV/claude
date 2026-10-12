@@ -61,8 +61,19 @@ Le mot de passe **n'est jamais enregistré**. Seule la session est gardée, dans
 `session_instagram`, pour que tu n'aies pas à te reconnecter à chaque fois.
 
 ### 2. Choisir ta collection
-Clique sur **Charger mes collections**, puis choisis ta collection de recettes dans la liste.
-Une collection dont le nom contient « recette » est choisie toute seule.
+Le plus simple : **Coller le lien de ma collection…**.
+1. Sur instagram.com, ouvre ton profil → **Enregistrements** → ta collection de recettes.
+2. Copie l'adresse de la page (Ctrl+L puis Ctrl+C). Elle ressemble à
+   `https://www.instagram.com/ton_nom/saved/recettes/17912345678901234/`.
+3. Dans le logiciel, clique sur **Coller le lien de ma collection…** et colle-la.
+
+Le bouton **Charger mes collections** donne aussi la liste. Instagram ne fournit plus toujours
+le nom des collections : elles s'appellent alors « Collection 1 (nom inconnu) »… Dans ce cas,
+colle plutôt le lien.
+
+> Instagram ne permet plus de lire une collection directement. Le logiciel parcourt donc tous
+> tes posts enregistrés et garde ceux de ta collection. C'est un peu plus long, et le journal
+> affiche où il en est.
 
 ### 3. Importer
 Clique sur **Importer les nouvelles recettes**. Pour chaque post, l'appli :

@@ -13,8 +13,8 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from . import __version__, ai, config, export, media
 from .importer import Importer, Options, reformat
-from .instagram import (ALL_SAVED, ALL_SAVED_LABEL, Insta, TwoFactorNeeded, friendly,
-                        parse_browser_copy)
+from .instagram import (ALL_SAVED, ALL_SAVED_LABEL, Insta, TwoFactorNeeded,
+                        collection_from_link, friendly, parse_browser_copy)
 from .parse import CATEGORIES
 from .store import (Store, empty_recipe, ingredients_to_text, text_to_ingredients,
                     text_to_steps)
@@ -442,6 +442,12 @@ class App:
         b = ttk.Button(row, text="Charger mes collections", command=self.load_collections)
         b.pack(side="left", padx=6)
         self.busy_buttons.append(b)
+        ttk.Button(row, text="Coller le lien de ma collection…",
+                   command=self.paste_collection_link).pack(side="left")
+        ttk.Label(box, foreground="#666", text=(
+            "Le lien : sur instagram.com, ouvre ton profil → Enregistrements → ta collection, "
+            "puis copie l'adresse de la page (elle contient /saved/).")).pack(anchor="w",
+                                                                             pady=(6, 0))
 
         box = ttk.LabelFrame(tab, text="3. Importer", padding=8)
         box.pack(fill="x")
@@ -498,6 +504,7 @@ class App:
     def _get_insta(self):
         if self.insta is None:
             self.insta = Insta(config.SESSION_DIR)
+            self.insta.notify = self.say
         return self.insta
 
     def _resume_session(self):
@@ -589,6 +596,32 @@ class App:
         if current:
             self.coll_var.set(self._coll_label(current))
         self.say(f"{len(colls) - 1} collection(s) trouvée(s). Choisis celle de tes recettes.")
+        if any("nom inconnu" in c[1] for c in colls):
+            self.say("Instagram ne donne plus le nom des collections. Le plus simple : clique sur "
+                     "« Coller le lien de ma collection… ».")
+
+    def paste_collection_link(self):
+        text = simpledialog.askstring(
+            "Lien de la collection",
+            "Sur instagram.com, ouvre ton profil → Enregistrements → ta collection de "
+            "recettes,\npuis copie l'adresse de la page (Ctrl+L puis Ctrl+C). Elle ressemble "
+            "à :\nhttps://www.instagram.com/ton_nom/saved/recettes/17912345678901234/\n\n"
+            "Colle-la ici :", parent=self.root)
+        if not text:
+            return
+        found = collection_from_link(text)
+        if not found:
+            messagebox.showinfo("Lien de la collection", "Ce lien ne ressemble pas au lien "
+                                "d'une collection (il doit contenir /saved/).")
+            return
+        cid, name = found
+        self.collections = [c for c in self.collections if c[0] != cid]
+        self.collections.append((cid, name, None))
+        self.coll_box.configure(values=[self._coll_label(c) for c in self.collections])
+        self.coll_var.set(name)
+        self.cfg["collection_id"], self.cfg["collection_name"] = cid, name
+        config.save(self.cfg)
+        self.say(f"Collection choisie : « {name} ».")
 
     @staticmethod
     def _coll_label(c):
