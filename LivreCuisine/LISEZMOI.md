@@ -32,19 +32,29 @@ les recettes importées.
 Onglet **⬇ Importer depuis Instagram** :
 
 ### 1. Se connecter
-Entre ton identifiant et ton mot de passe Instagram, puis clique sur **Se connecter**. Si tu
-as la vérification en deux étapes, l'appli te demande le code.
+Le plus fiable : **Coller un cookie sessionid…**. Instagram refuse souvent la connexion par
+mot de passe depuis un logiciel comme celui-ci.
+1. Dans Chrome ou Edge, connecte-toi normalement à instagram.com.
+2. Appuie sur **F12**, onglet **Application**. S'il est caché, clique sur les flèches **»**.
+   Va ensuite dans **Cookies** → `https://www.instagram.com`.
+3. Clique sur la ligne **sessionid**, double-clique sur sa valeur et copie-la en entier
+   (Ctrl+C).
+4. Dans le logiciel, clique sur **Coller un cookie sessionid…** et colle la valeur (Ctrl+V).
+
+Ne donne jamais ce cookie à quelqu'un d'autre : il permet d'accéder à ton compte. Si tu te
+déconnectes d'Instagram dans le navigateur, le cookie ne marche plus : il faudra en recoller
+un nouveau.
+
+Autres possibilités :
+- **Firefox** : connecte-toi à instagram.com dans Firefox, puis clique sur **Utiliser ma
+  connexion Firefox** ;
+- **mot de passe** : entre ton identifiant et ton mot de passe, puis clique sur **Se
+  connecter**. Si tu as la vérification en deux étapes, l'appli te demande le code. Si
+  Instagram demande de vérifier que c'est toi, confirme « C'était moi » sur ton téléphone. Ne
+  réessaie pas trop de fois de suite.
 
 Le mot de passe **n'est jamais enregistré**. Seule la session est gardée, dans le dossier
 `session_instagram`, pour que tu n'aies pas à te reconnecter à chaque fois.
-
-**Si Instagram bloque la connexion** (message « Instagram veut vérifier que c'est bien toi ») :
-- ouvre Instagram sur ton téléphone et confirme « C'était moi », puis réessaie ;
-- ou bien, si tu utilises **Firefox** : connecte-toi à instagram.com dans Firefox, puis
-  clique sur **Utiliser ma connexion Firefox** ;
-- ou bien, avec **Chrome / Edge** : clique sur **Coller un cookie sessionid…** et suis les
-  3 étapes affichées. Ne donne jamais ce cookie à quelqu'un d'autre : il permet d'accéder
-  à ton compte.
 
 ### 2. Choisir ta collection
 Clique sur **Charger mes collections**, puis choisis ta collection de recettes dans la liste.

@@ -48,11 +48,15 @@ def insta(tmp_path, monkeypatch):
                     "more_available": False}
         if path == "api/v1/feed/saved/posts/":
             return {"items": [{"media": media("SSS")}], "more_available": False}
-        if path == "api/v1/accounts/current_user/":
+        if path == "api/v1/users/123456/info/":
             return {"user": {"username": "moi"}}
         raise AssertionError(path)
 
-    monkeypatch.setattr(ins.L.context, "get_iphone_json", fake_json)
+    def no_app(path, params):
+        raise AssertionError("l'API de l'appli ne doit pas servir ici")
+
+    monkeypatch.setattr(ins.L.context, "get_json", lambda path, params, **kw: fake_json(path, params))
+    monkeypatch.setattr(ins.L.context, "get_iphone_json", no_app)
     ins.calls = calls
     return ins
 
@@ -89,9 +93,10 @@ def test_shortcode_from_link():
 
 
 def test_login_with_cookie_saves_session(insta, tmp_path):
-    user = insta.login_with_cookies({"sessionid": "123456%3Aabc%3A9"})
+    user = insta.login_with_cookies({"sessionid": " 123456:abc:9\n"})  # décodé, à réencoder
     assert user == "moi"
     assert insta.L.context.user_id == "123456"
+    assert insta.L.context._session.cookies.get_dict()["sessionid"] == "123456%3Aabc%3A9"
     assert (tmp_path / "session" / "session-moi").is_file()
 
     again = Insta(str(tmp_path / "session"))
@@ -121,3 +126,45 @@ def test_friendly_messages():
     assert "Mot de passe" in instagram.friendly(ie.BadCredentialsException("x"))
     assert "vérifier" in instagram.friendly(ie.LoginException("Checkpoint required. Point..."))
     assert "429" in instagram.friendly(ie.TooManyRequestsException("429 Too Many Requests"))
+
+
+def test_parse_cookie_text():
+    assert instagram.parse_cookie_text(" 123%3Aabc ") == {"sessionid": "123%3Aabc"}
+    assert instagram.parse_cookie_text("cookie: csrftoken=t; sessionid=1%3Ax; ds_user_id=1") == {
+        "csrftoken": "t", "sessionid": "1%3Ax", "ds_user_id": "1"}
+    assert instagram.cookie_value('"1%3Ax"') == "1%3Ax"
+
+
+def test_web_api_falls_back_to_app_api(tmp_path, monkeypatch):
+    import instaloader.exceptions as ie
+    ins = Insta(str(tmp_path))
+
+    def web_fails(path, params, **kw):
+        raise ie.ConnectionException('"fail" status, message "something went wrong"')
+    monkeypatch.setattr(ins.L.context, "get_json", web_fails)
+    monkeypatch.setattr(ins.L.context, "get_iphone_json",
+                        lambda path, params: {"items": [], "more_available": False})
+    assert ins.collections() == [(ALL_SAVED, "Tous mes posts enregistrés", None)]
+
+    monkeypatch.setattr(ins.L.context, "get_iphone_json", lambda p, q: web_fails(p, q))
+    with pytest.raises(ie.ConnectionException):
+        ins.collections()
+
+
+def test_cookie_accepted_even_if_account_name_unreadable(tmp_path, monkeypatch):
+    import instaloader.exceptions as ie
+    ins = Insta(str(tmp_path / "s"))
+
+    def web(path, params, **kw):
+        if path == "api/v1/collections/list/":
+            return {"items": [], "more_available": False}
+        raise ie.ConnectionException("something went wrong")
+    monkeypatch.setattr(ins.L.context, "get_json", web)
+    monkeypatch.setattr(ins.L.context, "get_iphone_json", lambda p, q: web(p, q))
+    assert ins.login_with_cookies({"sessionid": "777%3Az"}) == "777"
+
+
+def test_password_login_refused_message():
+    import instaloader.exceptions as ie
+    msg = instagram.friendly(ie.LoginException('Login error: "fail" status, message "".'))
+    assert "cookie" in msg

@@ -53,6 +53,10 @@ def friendly(exc):
     if isinstance(exc, ie.LoginRequiredException) or "login_required" in msg:
         return "La connexion à Instagram a expiré. Reconnecte-toi dans l'onglet Importer."
     if isinstance(exc, ie.LoginException):
+        if '"fail" status' in msg:
+            return ("Instagram refuse la connexion par mot de passe depuis ce logiciel (ça arrive "
+                    "souvent). Utilise plutôt « Coller un cookie sessionid… » : connecte-toi à "
+                    "instagram.com dans ton navigateur et suis les étapes affichées.")
         return f"Connexion refusée par Instagram : {msg}"
     if isinstance(exc, ie.QueryReturnedNotFoundException):
         return "Post introuvable (supprimé ou compte privé)."
@@ -116,17 +120,21 @@ class Insta:
 
     def login_with_cookies(self, cookies):
         """Session à partir des cookies d'un navigateur (au moins « sessionid »)."""
-        sid = urllib.parse.unquote(cookies.get("sessionid", "")).strip().strip('"')
+        data = {k: cookie_value(v) for k, v in cookies.items() if v}
+        sid = data.get("sessionid", "")
         if not sid:
             raise InstaError("Cookie « sessionid » introuvable.")
-        data = dict(cookies)
-        data["sessionid"] = sid
         data.setdefault("csrftoken", "")
         if not data.get("ds_user_id"):
-            data["ds_user_id"] = sid.split(":", 1)[0]
+            data["ds_user_id"] = urllib.parse.unquote(sid).split(":", 1)[0]
         self.L.context.load_session("?", data)
         self.L.context.user_id = data["ds_user_id"]
-        user = self.current_user()
+        try:
+            user = self.current_user()
+        except Exception as exc:
+            log.warning("Nom du compte illisible (%s), on essaie les collections", exc)
+            self.collections()  # lève l'erreur si le cookie ne marche vraiment pas
+            user = data["ds_user_id"]
         if not user:
             raise InstaError("Ce cookie ne donne pas accès à un compte Instagram connecté.")
         self.L.context.username = user
@@ -145,15 +153,51 @@ class Insta:
         self.L.context.username = None
         self.L.context.user_id = None
 
+    def _api(self, path, params=None):
+        """Requête à l'API d'Instagram, comme le site web, puis comme l'appli si ça échoue."""
+        import instaloader.exceptions as ie
+        params = dict(params or {})
+        try:
+            return self.L.context.get_json(path, params)
+        except (ie.TooManyRequestsException, ie.LoginRequiredException,
+                ie.QueryReturnedNotFoundException):
+            raise
+        except ie.InstaloaderException as web_exc:
+            log.warning("API web %s : %s ; essai par l'API de l'appli", path, web_exc)
+            try:
+                return self.L.context.get_iphone_json(path, params)
+            except ie.InstaloaderException as app_exc:
+                log.warning("API appli %s : %s", path, app_exc)
+                raise web_exc
+
     def current_user(self):
-        data = self.L.context.get_iphone_json("api/v1/accounts/current_user/", {"edit": "true"})
-        return (data.get("user") or {}).get("username")
+        """Nom du compte connecté."""
+        uid = self.L.context.user_id
+        tries = [("api/v1/accounts/edit/web_form_data/", {},
+                  lambda d: d["form_data"]["username"]),
+                 ("api/v1/accounts/current_user/", {"edit": "true"},
+                  lambda d: d["user"]["username"])]
+        if uid:
+            tries.insert(0, (f"api/v1/users/{uid}/info/", {}, lambda d: d["user"]["username"]))
+        error = None
+        for path, params, pick in tries:
+            try:
+                name = pick(self._api(path, params))
+                if name:
+                    return name
+            except (KeyError, TypeError) as exc:
+                error = error or exc
+            except Exception as exc:
+                error = exc
+        if error:
+            raise error
+        return None
 
     # ------------------------------------------------------------- collections
     def _pages(self, path, params=None):
         params = dict(params or {})
         while True:
-            data = self.L.context.get_iphone_json(path, params)
+            data = self._api(path, params)
             yield data
             nxt = data.get("next_max_id")
             if not data.get("more_available") or not nxt:
@@ -195,7 +239,12 @@ class Insta:
         code = shortcode_from_link(link)
         if not code:
             raise InstaError(f"Lien non reconnu : {link}")
-        return Post.from_shortcode(self.L.context, code)
+        try:
+            data = self._api(f"api/v1/media/{Post.shortcode_to_mediaid(code)}/info/")
+            return Post.from_iphone_struct(self.L.context, _normalize(data["items"][0]))
+        except (KeyError, IndexError, TypeError) as exc:
+            log.warning("Lien %s lu autrement (%s)", code, exc)
+            return Post.from_shortcode(self.L.context, code)
 
     # ------------------------------------------------------------- contenu
     @staticmethod
@@ -236,6 +285,27 @@ class Insta:
             shutil.copyfileobj(resp.raw, fh)
         os.replace(tmp, path)
         return path
+
+
+def cookie_value(value):
+    """Valeur de cookie telle que le navigateur l'envoie (« 123%3Aabc », pas « 123:abc »)."""
+    value = (value or "").strip().strip('"').strip()
+    return urllib.parse.quote(urllib.parse.unquote(value), safe="")
+
+
+def parse_cookie_text(text):
+    """Accepte la seule valeur de « sessionid », ou une ligne « a=b; sessionid=c; … »."""
+    text = (text or "").strip()
+    if text.lower().startswith("cookie:"):
+        text = text[7:]
+    if "sessionid=" not in text:
+        return {"sessionid": text}
+    cookies = {}
+    for part in text.split(";"):
+        if "=" in part:
+            name, value = part.split("=", 1)
+            cookies[name.strip()] = value.strip()
+    return cookies
 
 
 def _normalize(media):

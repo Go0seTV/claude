@@ -13,7 +13,8 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from . import __version__, ai, config, export, media
 from .importer import Importer, Options, reformat
-from .instagram import ALL_SAVED, ALL_SAVED_LABEL, Insta, TwoFactorNeeded, friendly
+from .instagram import (ALL_SAVED, ALL_SAVED_LABEL, Insta, TwoFactorNeeded, friendly,
+                        parse_cookie_text)
 from .parse import CATEGORIES
 from .store import (Store, empty_recipe, ingredients_to_text, text_to_ingredients,
                     text_to_steps)
@@ -552,14 +553,17 @@ class App:
                     "Lecture de la connexion Firefox…")
 
     def do_cookie(self):
-        sid = simpledialog.askstring("Cookie sessionid", (
+        text = simpledialog.askstring("Cookie sessionid", (
             "Dans Chrome ou Edge, connecte-toi à instagram.com, puis :\n"
             "  1. appuie sur F12 ;\n"
-            "  2. onglet « Application » → « Cookies » → https://www.instagram.com ;\n"
-            "  3. copie la valeur de la ligne « sessionid ».\n\n"
-            "Colle-la ici (ne la donne à personne d'autre) :"), parent=self.root)
-        if sid and sid.strip():
-            self.run_bg(lambda: self._get_insta().login_with_cookies({"sessionid": sid.strip()}),
+            "  2. onglet « Application » (s'il est caché, clique sur les flèches » en haut) "
+            "→ « Cookies » → https://www.instagram.com ;\n"
+            "  3. clique sur la ligne « sessionid », puis double-clique sur sa valeur "
+            "(colonne « Value ») et copie-la en entier avec Ctrl+C.\n\n"
+            "Colle-la ici avec Ctrl+V (ne la donne à personne d'autre) :"), parent=self.root)
+        if text and text.strip():
+            cookies = parse_cookie_text(text)
+            self.run_bg(lambda: self._get_insta().login_with_cookies(cookies),
                         self._logged_in, "Vérification du cookie…")
 
     def do_logout(self):
