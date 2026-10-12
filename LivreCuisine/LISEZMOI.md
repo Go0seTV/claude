@@ -32,18 +32,22 @@ les recettes importées.
 Onglet **⬇ Importer depuis Instagram** :
 
 ### 1. Se connecter
-Le plus fiable : **Coller un cookie sessionid…**. Instagram refuse souvent la connexion par
-mot de passe depuis un logiciel comme celui-ci.
-1. Dans Chrome ou Edge, connecte-toi normalement à instagram.com.
-2. Appuie sur **F12**, onglet **Application**. S'il est caché, clique sur les flèches **»**.
-   Va ensuite dans **Cookies** → `https://www.instagram.com`.
-3. Clique sur la ligne **sessionid**, double-clique sur sa valeur et copie-la en entier
-   (Ctrl+C).
-4. Dans le logiciel, clique sur **Coller un cookie sessionid…** et colle la valeur (Ctrl+V).
+Le plus fiable : **Copier la connexion du navigateur…**. Instagram refuse souvent la connexion
+par mot de passe depuis un logiciel comme celui-ci, et il bloque aussi un simple cookie qui
+arrive sans le reste de la connexion : il croit alors à un appareil inconnu, sans rien
+t'envoyer sur ton téléphone.
+1. Dans Chrome ou Edge, ouvre instagram.com et vérifie que tu es connecté.
+2. Appuie sur **F12**, puis va dans l'onglet **Réseau** (ou **Network**).
+3. Appuie sur **F5** pour recharger la page.
+4. Tout en haut de la liste, fais un clic droit sur la ligne **www.instagram.com**, puis
+   **Copier → Copier en tant que cURL (bash)**. Le choix « (cmd) » marche aussi.
+5. Dans le logiciel, clique sur **Copier la connexion du navigateur…**, colle tout (Ctrl+V)
+   et clique sur **Se connecter**.
 
-Ne donne jamais ce cookie à quelqu'un d'autre : il permet d'accéder à ton compte. Si tu te
-déconnectes d'Instagram dans le navigateur, le cookie ne marche plus : il faudra en recoller
-un nouveau.
+Ça copie tous les cookies et l'identité de ton navigateur : Instagram reconnaît la connexion
+comme la tienne. Ce texte permet d'accéder à ton compte : ne le colle nulle part ailleurs.
+Si tu te déconnectes d'Instagram dans le navigateur, il ne marche plus : recommence alors
+ces étapes.
 
 Autres possibilités :
 - **Firefox** : connecte-toi à instagram.com dans Firefox, puis clique sur **Utiliser ma

@@ -14,7 +14,7 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from . import __version__, ai, config, export, media
 from .importer import Importer, Options, reformat
 from .instagram import (ALL_SAVED, ALL_SAVED_LABEL, Insta, TwoFactorNeeded, friendly,
-                        parse_cookie_text)
+                        parse_browser_copy)
 from .parse import CATEGORIES
 from .store import (Store, empty_recipe, ingredients_to_text, text_to_ingredients,
                     text_to_steps)
@@ -417,9 +417,9 @@ class App:
         self.busy_buttons.append(b)
         row = ttk.Frame(box)
         row.pack(fill="x", pady=(8, 0))
-        ttk.Label(row, text="Si Instagram bloque la connexion :").pack(side="left")
-        for text, cmd in (("Utiliser ma connexion Firefox", self.do_firefox),
-                          ("Coller un cookie sessionid…", self.do_cookie)):
+        ttk.Label(row, text="Conseillé :").pack(side="left")
+        for text, cmd in (("Copier la connexion du navigateur…", self.do_cookie),
+                          ("Utiliser ma connexion Firefox", self.do_firefox)):
             b = ttk.Button(row, text=text, command=cmd)
             b.pack(side="left", padx=4)
             self.busy_buttons.append(b)
@@ -553,18 +553,11 @@ class App:
                     "Lecture de la connexion Firefox…")
 
     def do_cookie(self):
-        text = simpledialog.askstring("Cookie sessionid", (
-            "Dans Chrome ou Edge, connecte-toi à instagram.com, puis :\n"
-            "  1. appuie sur F12 ;\n"
-            "  2. onglet « Application » (s'il est caché, clique sur les flèches » en haut) "
-            "→ « Cookies » → https://www.instagram.com ;\n"
-            "  3. clique sur la ligne « sessionid », puis double-clique sur sa valeur "
-            "(colonne « Value ») et copie-la en entier avec Ctrl+C.\n\n"
-            "Colle-la ici avec Ctrl+V (ne la donne à personne d'autre) :"), parent=self.root)
-        if text and text.strip():
-            cookies = parse_cookie_text(text)
-            self.run_bg(lambda: self._get_insta().login_with_cookies(cookies),
-                        self._logged_in, "Vérification du cookie…")
+        def go(text):
+            cookies, ua = parse_browser_copy(text)
+            self.run_bg(lambda: self._get_insta().login_with_cookies(cookies, ua),
+                        self._logged_in, "Vérification de la connexion…")
+        BrowserCopyDialog(self.root, go)
 
     def do_logout(self):
         if self.insta:
@@ -969,6 +962,57 @@ class RecipeDialog(tk.Toplevel):
         rec["method"] = "manuel"
         self.destroy()
         self.on_save(rec)
+
+
+class BrowserCopyDialog(tk.Toplevel):
+    """Pour coller la connexion Instagram copiée depuis Chrome ou Edge."""
+
+    STEPS = (
+        "Dans Chrome ou Edge :\n"
+        "  1. Ouvre instagram.com et vérifie que tu es connecté (tu vois ton fil).\n"
+        "  2. Appuie sur F12, puis va dans l'onglet « Réseau » (ou « Network »).\n"
+        "  3. Appuie sur F5 pour recharger la page : une liste de lignes apparaît.\n"
+        "  4. Tout en haut, fais un clic droit sur la ligne « www.instagram.com »\n"
+        "     → « Copier » → « Copier en tant que cURL (bash) » (ou « (cmd) »).\n"
+        "  5. Colle tout ici avec Ctrl+V, puis clique sur « Se connecter ».\n\n"
+        "Ça copie ta connexion et l'identité de ton navigateur : Instagram la reconnaît "
+        "alors comme la tienne.\nCe texte donne accès à ton compte : ne le colle nulle part "
+        "ailleurs. On peut aussi coller seulement la valeur du cookie « sessionid »."
+    )
+
+    def __init__(self, parent, on_ok):
+        super().__init__(parent)
+        self.on_ok = on_ok
+        self.title("Copier la connexion du navigateur")
+        self.geometry("720x520")
+        self.transient(parent)
+        f = ttk.Frame(self, padding=12)
+        f.pack(fill="both", expand=True)
+        ttk.Label(f, text=self.STEPS, justify="left", wraplength=690).pack(anchor="w")
+        self.text = tk.Text(f, height=8, wrap="char", font=(UI_FONT, 9))
+        self.text.pack(fill="both", expand=True, pady=8)
+        self.text.focus_set()
+        row = ttk.Frame(f)
+        row.pack(anchor="e")
+        ttk.Button(row, text="Annuler", command=self.destroy).pack(side="left", padx=4)
+        ttk.Button(row, text="Se connecter", style="Big.TButton", command=self.ok).pack(
+            side="left")
+        self.grab_set()
+
+    def ok(self):
+        text = self.text.get("1.0", "end").strip()
+        if not text:
+            messagebox.showinfo("Connexion", "Colle d'abord ce que tu as copié.", parent=self)
+            return
+        cookies, _ua = parse_browser_copy(text)
+        if not cookies.get("sessionid") or " " in cookies["sessionid"]:
+            messagebox.showinfo("Connexion", (
+                "Je ne trouve pas le cookie « sessionid » dans ce texte. Vérifie que tu es bien "
+                "connecté à Instagram dans le navigateur, et que tu as copié la ligne "
+                "« www.instagram.com »."), parent=self)
+            return
+        self.destroy()
+        self.on_ok(text)
 
 
 class LinksDialog(tk.Toplevel):

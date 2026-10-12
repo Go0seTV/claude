@@ -19,6 +19,10 @@ log = logging.getLogger("livrecuisine")
 ALL_SAVED = "__tous__"
 ALL_SAVED_LABEL = "Tous mes posts enregistrés"
 API_TIMEOUT = 20
+# Instaloader se présente comme Chrome sous Linux : sur un PC Windows, ça ressemble à un
+# appareil inconnu. On prend l'identité du navigateur quand on l'a (copie cURL), sinon celle-ci.
+DEFAULT_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36")
 
 
 class InstaError(Exception):
@@ -45,9 +49,10 @@ def friendly(exc):
     if isinstance(exc, ie.TwoFactorAuthRequiredException):
         return "Instagram demande le code de vérification en deux étapes."
     if "checkpoint" in msg.lower() or "challenge" in msg.lower():
-        return ("Instagram veut vérifier que c'est bien toi. Ouvre Instagram sur ton téléphone ou "
-                "dans ton navigateur et confirme « C'était moi », puis réessaie. Si ça bloque "
-                "encore, utilise « Utiliser ma connexion Firefox » ou « Coller un cookie ».")
+        return ("Instagram a refusé la connexion par sécurité (il ne reconnaît pas le logiciel "
+                "comme ton navigateur). Ouvre instagram.com dans ton navigateur : si une "
+                "vérification s'affiche, fais-la. Puis reconnecte le logiciel avec « Copier la "
+                "connexion du navigateur… », en suivant la méthode « Copier en tant que cURL ».")
     if isinstance(exc, ie.TooManyRequestsException) or "429" in msg:
         return ("Instagram trouve qu'on va trop vite (erreur 429). Attends une heure, puis "
                 "relance : les recettes déjà importées sont gardées.")
@@ -56,8 +61,8 @@ def friendly(exc):
     if isinstance(exc, ie.LoginException):
         if '"fail" status' in msg:
             return ("Instagram refuse la connexion par mot de passe depuis ce logiciel (ça arrive "
-                    "souvent). Utilise plutôt « Coller un cookie sessionid… » : connecte-toi à "
-                    "instagram.com dans ton navigateur et suis les étapes affichées.")
+                    "souvent). Utilise plutôt « Copier la connexion du navigateur… » : "
+                    "connecte-toi à instagram.com dans ton navigateur et suis les étapes.")
         return f"Connexion refusée par Instagram : {msg}"
     if isinstance(exc, ie.QueryReturnedNotFoundException):
         return "Post introuvable (supprimé ou compte privé)."
@@ -74,7 +79,7 @@ class Insta:
             quiet=True, download_pictures=False, download_videos=False,
             download_video_thumbnails=False, download_geotags=False, download_comments=False,
             save_metadata=False, compress_json=False, max_connection_attempts=3,
-            request_timeout=60.0, iphone_support=True)
+            request_timeout=60.0, iphone_support=True, user_agent=DEFAULT_USER_AGENT)
         self.pending_user = None
 
     # ------------------------------------------------------------- connexion
@@ -103,7 +108,20 @@ class Insta:
         uid = self.L.context._session.cookies.get_dict().get("ds_user_id")
         if uid:
             self.L.context.user_id = uid
+        try:
+            with open(self._ua_file(user), encoding="utf-8") as fh:
+                self._set_user_agent(fh.read().strip())
+        except OSError:
+            pass
         return True
+
+    def _ua_file(self, user):
+        return os.path.join(self.session_dir, f"navigateur-{user.lower()}.txt")
+
+    def _set_user_agent(self, ua):
+        if ua:
+            self.L.context.user_agent = ua
+            self.L.context._session.headers["User-Agent"] = ua
 
     def login(self, user, password):
         import instaloader.exceptions as ie
@@ -119,9 +137,13 @@ class Insta:
         self.L.two_factor_login(re.sub(r"\D", "", code))
         self._after_login()
 
-    def login_with_cookies(self, cookies):
-        """Session à partir des cookies d'un navigateur (au moins « sessionid »)."""
-        data = {k: cookie_value(v) for k, v in cookies.items() if v}
+    def login_with_cookies(self, cookies, user_agent=None):
+        """Session à partir des cookies d'un navigateur (au moins « sessionid »).
+
+        user_agent : identité du navigateur d'où viennent les cookies, si on la connaît."""
+        data = {k.strip(): v.strip() for k, v in cookies.items() if k.strip() and v}
+        if data.get("sessionid"):
+            data["sessionid"] = cookie_value(data["sessionid"])
         sid = data.get("sessionid", "")
         if not sid:
             raise InstaError("Cookie « sessionid » introuvable.")
@@ -130,6 +152,7 @@ class Insta:
             data["ds_user_id"] = urllib.parse.unquote(sid).split(":", 1)[0]
         self.L.context.load_session("?", data)
         self.L.context.user_id = data["ds_user_id"]
+        self._set_user_agent(user_agent)
         try:
             user = self.current_user()
         except Exception as exc:
@@ -140,6 +163,9 @@ class Insta:
             raise InstaError("Ce cookie ne donne pas accès à un compte Instagram connecté.")
         self.L.context.username = user
         self._after_login()
+        if user_agent:
+            with open(self._ua_file(user), "w", encoding="utf-8") as fh:
+                fh.write(user_agent)
         return user
 
     def login_with_firefox(self):
@@ -147,10 +173,11 @@ class Insta:
 
     def logout(self):
         if self.username:
-            try:
-                os.remove(self.session_file(self.username))
-            except OSError:
-                pass
+            for path in (self.session_file(self.username), self._ua_file(self.username)):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
         self.L.context.username = None
         self.L.context.user_id = None
 
@@ -164,7 +191,10 @@ class Insta:
         import requests
         sess = self.L.context._session
         url = f"https://www.instagram.com/{path}"
-        headers = {"X-IG-WWW-Claim": "0", "Referer": "https://www.instagram.com/"}
+        headers = {"X-IG-WWW-Claim": "0", "Referer": "https://www.instagram.com/",
+                   "Accept": "*/*", "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+                   "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors",
+                   "Sec-Fetch-Dest": "empty"}
         try:
             resp = sess.get(url, params=dict(params or {}), headers=headers, timeout=API_TIMEOUT,
                             allow_redirects=False)
@@ -322,17 +352,40 @@ def cookie_value(value):
 
 def parse_cookie_text(text):
     """Accepte la seule valeur de « sessionid », ou une ligne « a=b; sessionid=c; … »."""
+    return parse_browser_copy(text)[0]
+
+
+def parse_browser_copy(text):
+    """Ce que l'utilisateur a copié dans son navigateur -> (cookies, user-agent ou None).
+
+    Accepte « Copier en tant que cURL » (bash ou cmd), « Copier les en-têtes de la requête »,
+    une ligne de cookies « a=b; sessionid=c », ou la seule valeur de sessionid.
+    """
     text = (text or "").strip()
-    if text.lower().startswith("cookie:"):
-        text = text[7:]
-    if "sessionid=" not in text:
-        return {"sessionid": text}
+    if '^"' in text:  # cURL (cmd) : ^ sert de caractère d'échappement
+        text = re.sub(r"\^(.)", r"\1", text).replace('\\"', '"')
+    ua = None
+    m = re.search(r"user-agent:\s*([^'\"\r\n]+)", text, re.I)
+    if m:
+        ua = m.group(1).strip()
+    line = None
+    m = re.search(r"(?:^|\s)(?:-b|--cookie)\s+(['\"])(.*?)\1", text, re.S)
+    if m:
+        line = m.group(2)
+    else:
+        m = re.search(r"(?:^|['\"\s])cookie:\s*([^'\"\r\n]+)", text, re.I)
+        if m:
+            line = m.group(1)
+        elif "sessionid=" in text:
+            line = text
+    if line is None:
+        return {"sessionid": text.strip().strip("'\"")}, ua
     cookies = {}
-    for part in text.split(";"):
+    for part in line.split(";"):
         if "=" in part:
             name, value = part.split("=", 1)
             cookies[name.strip()] = value.strip()
-    return cookies
+    return cookies, ua
 
 
 def _normalize(media):

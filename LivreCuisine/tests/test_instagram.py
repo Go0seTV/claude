@@ -151,7 +151,7 @@ def test_firefox_cookies(tmp_path, monkeypatch):
 def test_friendly_messages():
     import instaloader.exceptions as ie
     assert "Mot de passe" in instagram.friendly(ie.BadCredentialsException("x"))
-    assert "vérifier" in instagram.friendly(ie.LoginException("Checkpoint required. Point..."))
+    assert "sécurité" in instagram.friendly(ie.LoginException("Checkpoint required. Point..."))
     assert "429" in instagram.friendly(ie.TooManyRequestsException("429 Too Many Requests"))
 
 
@@ -181,7 +181,7 @@ def test_api_errors_are_quick_and_clear(tmp_path, monkeypatch):
         answers["r"] = resp
         with pytest.raises(exc):
             ins.collections()
-    assert "vérifier" in instagram.friendly(ie.LoginException("Checkpoint required (x)"))
+    assert "sécurité" in instagram.friendly(ie.LoginException("Checkpoint required (x)"))
 
 
 def test_cookie_accepted_even_if_account_name_unreadable(tmp_path, monkeypatch):
@@ -198,4 +198,56 @@ def test_cookie_accepted_even_if_account_name_unreadable(tmp_path, monkeypatch):
 def test_password_login_refused_message():
     import instaloader.exceptions as ie
     msg = instagram.friendly(ie.LoginException('Login error: "fail" status, message "".'))
-    assert "cookie" in msg
+    assert "connexion du navigateur" in msg
+
+
+CURL_BASH = """curl 'https://www.instagram.com/' \\
+  -H 'accept: text/html,application/xhtml+xml' \\
+  -H 'accept-language: fr-FR,fr;q=0.9' \\
+  -b 'csrftoken=TOK; ds_user_id=123456; sessionid=123456%3Aabc%3A9; mid=MID; rur="CCO\\0541\\0542"' \\
+  -H 'user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/141.0.0.0 Safari/537.36'"""
+
+CURL_CMD = ('curl ^"https://www.instagram.com/^" ^\n'
+            '  -H ^"accept: text/html^" ^\n'
+            '  -b ^"csrftoken=TOK; ds_user_id=123456; sessionid=123456^%^3Aabc^%^3A9^" ^\n'
+            '  -H ^"user-agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/141.0^"')
+
+
+def test_parse_browser_copy_formats():
+    cookies, ua = instagram.parse_browser_copy(CURL_BASH)
+    assert cookies["sessionid"] == "123456%3Aabc%3A9" and cookies["mid"] == "MID"
+    assert cookies["csrftoken"] == "TOK"
+    assert ua.startswith("Mozilla/5.0 (Windows NT 10.0") and ua.endswith("Safari/537.36")
+    cookies, ua = instagram.parse_browser_copy(CURL_CMD)
+    assert cookies == {"csrftoken": "TOK", "ds_user_id": "123456", "sessionid": "123456%3Aabc%3A9"}
+    assert ua.endswith("Edg/141.0")
+    cookies, ua = instagram.parse_browser_copy("cookie: a=1; sessionid=9%3Ax\nuser-agent: UA 1")
+    assert cookies == {"a": "1", "sessionid": "9%3Ax"} and ua == "UA 1"
+    assert instagram.parse_browser_copy("'123%3Aabc'") == ({"sessionid": "123%3Aabc"}, None)
+
+
+def test_curl_login_sends_all_cookies_and_browser_identity(insta, tmp_path, monkeypatch):
+    sent = []
+    real_get = requests.Session.get
+
+    def spy(self, url, params=None, **kw):
+        sent.append((dict(self.cookies.get_dict()), self.headers.get("User-Agent"),
+                     self.headers.get("X-CSRFToken")))
+        return real_get(self, url, params=params, **kw)
+    monkeypatch.setattr(requests.Session, "get", spy)
+
+    cookies, ua = instagram.parse_browser_copy(CURL_BASH)
+    assert insta.login_with_cookies(cookies, ua) == "moi"
+    jar, agent, csrf = sent[0]
+    assert jar["mid"] == "MID" and jar["sessionid"] == "123456%3Aabc%3A9"
+    assert agent == ua and csrf == "TOK"
+
+    again = Insta(str(tmp_path / "session"))
+    assert again.resume("moi")
+    assert again.L.context._session.headers["User-Agent"] == ua  # identité gardée
+    again.logout()
+    assert not (tmp_path / "session" / "navigateur-moi.txt").exists()
+
+
+def test_default_identity_is_windows():
+    assert "Windows" in instagram.DEFAULT_USER_AGENT
