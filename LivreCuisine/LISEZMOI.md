@@ -8,6 +8,7 @@ et les range dans un vrai livre de cuisine sur ton PC :
 - chaque recette bien présentée : photo, ingrédients, étapes, astuces, lien vers le post ;
 - **tes notes** sur chaque recette (« moins de sucre », « à refaire ») ;
 - tu peux **corriger** une recette, ou en **ajouter** une à la main ;
+- les **macros** de chaque plat : kcal, protéines, glucides, lipides, par portion ;
 - **impression / PDF** d'une recette ou de tout le livre, avec sommaire.
 
 Tout reste sur ton PC, dans le dossier `Mes recettes`. Ça marche même sans internet une fois
@@ -153,6 +154,26 @@ Dans le formulaire **Modifier** : un ingrédient par ligne, et une ligne qui fin
 démarre un groupe (« Pour la sauce : »). Une étape par ligne.
 
 ---
+
+## 🧮 Macros (kcal, protéines, glucides, lipides)
+
+Sous les ingrédients de chaque recette, la partie **Valeurs nutritives** donne les macros
+**par portion** et pour la recette entière. Le calcul se fait sur ton PC, sans internet ni
+clé payante :
+1. chaque ingrédient est lu (« 200 g de farine », « 2 œufs », « 1 c. à soupe d'huile »,
+   « 20 cl de crème », « 2 pots de sucre »…) et converti en grammes ;
+2. il est retrouvé dans une table d'environ 200 aliments courants (valeurs moyennes pour des
+   ingrédients crus) ;
+3. le total est divisé par le nombre de portions (« Pour combien » dans la recette).
+
+Le bouton **🧮 Macros** montre le détail, ingrédient par ingrédient. Les lignes en orange
+ne sont pas comptées : quantité manquante (« parmesan ») ou ingrédient pas reconnu. Pour les
+corriger, clique sur **Modifier** et écris la quantité au début, par exemple « 30 g de
+parmesan ». Le sel, les épices, les herbes et l'eau ne comptent pas.
+
+C'est une **estimation** (± 15 %) : les valeurs changent selon les marques, la cuisson et ce
+qu'on jette (os, peau, jus). Indique bien le nombre de portions dans la recette, sinon seul le
+total s'affiche.
 
 ## Fichiers
 - `Mes recettes\recettes.json` : toutes tes recettes, avec une copie de secours

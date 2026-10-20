@@ -5,7 +5,7 @@ import datetime
 import html
 import os
 
-from . import __version__
+from . import __version__, nutrition
 
 CSS = """
 :root { --ink:#2b2522; --soft:#7a6f68; --line:#e8dfd6; --accent:#b4532a; --paper:#fffdf9; }
@@ -30,6 +30,8 @@ h3 { font-family: system-ui, sans-serif; font-size: .82em; text-transform: upper
 h4 { font-size: 1em; margin: 14px 0 4px; font-style: italic; }
 ul { padding-left: 1.1em; margin: 0; } li { margin: 3px 0; }
 ol.steps { padding-left: 1.3em; margin: 0; } ol.steps li { margin: 0 0 10px; }
+.macros { margin-top: 18px; font-family: system-ui, sans-serif; font-size: .92em; }
+.macros small { color: var(--soft); }
 .tips, .notes { margin-top: 18px; padding: 12px 14px; background: #f6efe6; border-radius: 6px; }
 .raw { white-space: pre-wrap; font-size: .9em; color: var(--soft); }
 .src { font-family: system-ui, sans-serif; font-size: .8em; color: var(--soft); margin-top: 16px; }
@@ -86,6 +88,14 @@ def recipe_html(store, rec, anchor):
         raw = rec.get("transcript") or rec.get("caption")
         if raw:
             out.append(f'<h3>Texte du post</h3><p class="raw">{_e(raw)}</p>')
+    m = nutrition.compute(rec)
+    if m["counted"]:
+        if m["per_portion"]:
+            text = (f"Par portion ({m['portions']:g}) : {nutrition.summary(m['per_portion'])}"
+                    f"<br><small>Recette entière : {nutrition.summary(m['total'])}</small>")
+        else:
+            text = f"Recette entière : {nutrition.summary(m['total'])}"
+        out.append(f'<div class="macros"><h3>Valeurs nutritives (estimation)</h3>{text}</div>')
     if rec.get("tips"):
         out.append(f'<div class="tips"><h3>Astuces</h3>{_e(rec["tips"])}</div>')
     if rec.get("notes"):

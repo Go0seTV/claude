@@ -11,7 +11,7 @@ import traceback
 import webbrowser
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
-from . import __version__, ai, config, export, media
+from . import __version__, ai, config, export, media, nutrition
 from .importer import Importer, Options, reformat
 from .instagram import (ALL_SAVED, ALL_SAVED_LABEL, Insta, TwoFactorNeeded,
                         collection_from_link, friendly, parse_browser_copy)
@@ -149,6 +149,8 @@ class App:
         self.fav_btn.pack(side="left")
         ttk.Button(bar, text="✏ Modifier", command=self.edit_recipe).pack(side="left", padx=4)
         ttk.Button(bar, text="Instagram", command=self.open_source).pack(side="left")
+        ttk.Button(bar, text="🧮 Macros", command=self.show_macro_detail).pack(side="left",
+                                                                              padx=(4, 0))
         self.ai_btn = ttk.Button(bar, text="✨ Mise en forme Claude",
                                  command=self.reformat_current)
         self.ai_btn.pack(side="left", padx=4)
@@ -178,6 +180,9 @@ class App:
         v.tag_configure("step", lmargin1=8, lmargin2=30, spacing3=8)
         v.tag_configure("raw", font=(UI_FONT, 9), foreground="#7a6f68", lmargin1=4, lmargin2=4)
         v.tag_configure("center", justify="center")
+        v.tag_configure("macro", font=(UI_FONT, 11, "bold"), lmargin1=8, lmargin2=8)
+        v.tag_configure("macro_small", font=(UI_FONT, 9), foreground="#7a6f68", lmargin1=8,
+                        lmargin2=8)
         v.configure(state="disabled")
 
         notes = ttk.LabelFrame(right, text="Mes notes (modifications, avis, à refaire…)",
@@ -285,6 +290,7 @@ class App:
                     v.insert("end", g["group"] + "\n", "group")
                 for item in g.get("items", []):
                     v.insert("end", f"•  {item}\n", "item")
+            self._show_macros(rec)
         if rec.get("steps"):
             v.insert("end", "PRÉPARATION\n", "h")
             for i, step in enumerate(rec["steps"], 1):
@@ -305,6 +311,34 @@ class App:
         v.configure(state="disabled")
         v.yview_moveto(0)
         self.notes.insert("1.0", rec.get("notes", ""))
+
+    def _show_macros(self, rec):
+        m = nutrition.compute(rec)
+        if not m["counted"]:
+            return
+        v = self.view
+        v.insert("end", "VALEURS NUTRITIVES (estimation)\n", "h")
+        if m["per_portion"]:
+            n = m["portions"]
+            v.insert("end", f"Par portion ({n:g}) : {nutrition.summary(m['per_portion'])}\n",
+                     "macro")
+            v.insert("end", f"Recette entière : {nutrition.summary(m['total'])}\n",
+                     "macro_small")
+        else:
+            v.insert("end", f"Recette entière : {nutrition.summary(m['total'])}\n", "macro")
+            v.insert("end", "Indique « Pour combien » (bouton Modifier) pour avoir les valeurs "
+                            "par portion.\n", "macro_small")
+        if m["missing"]:
+            names = ", ".join(
+                (l["line"] + (" (quantité ?)" if l["status"] == "quantite" else ""))
+                for l in m["missing"][:6]) + ("…" if len(m["missing"]) > 6 else "")
+            v.insert("end", f"Pas comptés : {names}. Bouton « 🧮 Macros » pour le détail.\n",
+                     "macro_small")
+
+    def show_macro_detail(self):
+        rec = self._current()
+        if rec:
+            MacroDialog(self.root, rec)
 
     # ---------------------------------------------------------------- actions livre
     def _current(self):
@@ -1046,6 +1080,58 @@ class BrowserCopyDialog(tk.Toplevel):
             return
         self.destroy()
         self.on_ok(text)
+
+
+class MacroDialog(tk.Toplevel):
+    """Détail du calcul des macros, ingrédient par ingrédient."""
+
+    STATUS = {"ok": "", "neutre": "négligeable", "quantite": "quantité ?",
+              "inconnu": "pas reconnu"}
+
+    def __init__(self, parent, rec):
+        super().__init__(parent)
+        self.title(f"Macros – {rec.get('title', '')}")
+        self.geometry("900x520")
+        self.transient(parent)
+        m = nutrition.compute(rec)
+        f = ttk.Frame(self, padding=12)
+        f.pack(fill="both", expand=True)
+        if m["per_portion"]:
+            head = (f"Par portion ({m['portions']:g}) : {nutrition.summary(m['per_portion'])}\n"
+                    f"Recette entière : {nutrition.summary(m['total'])}")
+        else:
+            head = (f"Recette entière : {nutrition.summary(m['total'])}\n"
+                    "Indique « Pour combien » dans la recette pour avoir les valeurs par portion.")
+        ttk.Label(f, text=head, font=(UI_FONT, 11, "bold"), justify="left").pack(anchor="w")
+        cols = (("line", "Ingrédient de la recette", 300), ("food", "Reconnu comme", 150),
+                ("grams", "Poids", 70), ("kcal", "kcal", 60), ("prot", "Prot.", 60),
+                ("gluc", "Gluc.", 60), ("lip", "Lip.", 60), ("note", "", 100))
+        frame = ttk.Frame(f)
+        frame.pack(fill="both", expand=True, pady=8)
+        tree = ttk.Treeview(frame, columns=[c[0] for c in cols], show="headings")
+        for key, title, width in cols:
+            tree.heading(key, text=title)
+            tree.column(key, width=width, anchor="w" if key in ("line", "food", "note") else "e",
+                        stretch=key == "line")
+        ys = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=ys.set)
+        tree.pack(side="left", fill="both", expand=True)
+        ys.pack(side="left", fill="y")
+        tree.tag_configure("bad", background="#fff1d6")
+        for line in m["lines"]:
+            ok = line["status"] == "ok"
+            tree.insert("", "end", tags=() if line["status"] in ("ok", "neutre") else ("bad",),
+                        values=(line["line"], line["food"] or "",
+                                f"{line['grams']:.0f} g" if ok else "",
+                                *(f"{line[k]:.0f}" if ok else "" for k in
+                                  ("kcal", "prot", "gluc", "lip")),
+                                self.STATUS[line["status"]]))
+        ttk.Label(f, foreground="#666", justify="left", wraplength=860, text=(
+            "Estimation à partir de valeurs moyennes pour des ingrédients crus (± 15 %). "
+            "Pour corriger une ligne orange, clique sur « Modifier » et écris la quantité au "
+            "début, par exemple « 30 g de parmesan » ou « 2 c. à soupe d'huile ». Les épices, "
+            "le sel et l'eau ne comptent pas.")).pack(anchor="w")
+        ttk.Button(f, text="Fermer", command=self.destroy).pack(anchor="e", pady=(8, 0))
 
 
 class LinksDialog(tk.Toplevel):
